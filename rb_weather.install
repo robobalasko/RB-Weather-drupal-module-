@@ -1,0 +1,30 @@
+<?php
+
+/**
+ * Implements hook_schema().
+ * 
+ * Creates the base database table for storing the individual
+ * location identificators the weather at which will be displayed by the block.
+ */
+function rb_weather_schema() {
+	$schema['rb_weather_locations'] = array(
+			'description' => t('Table containing the identificators for the individual weather stations'),
+			'fields' => array(
+					'wlid' => array(
+							'description' => t('The primary identifier for a weather location'),
+							'type' => 'serial',
+							'unsigned' => TRUE,
+							'not null' => TRUE,
+					),
+					'weather_location_identifier' => array(
+							'description' => t('The identifier of a weather location in an external api'),
+							'type' => 'varchar',
+							'length' => 255,
+							'not null' => TRUE,
+					),
+			),
+			'primary key' => array('wlid'),
+	);
+	
+	return $schema;
+}

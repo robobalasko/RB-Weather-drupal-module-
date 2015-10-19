@@ -1,0 +1,150 @@
+<?php
+
+const CONDITIONS_URL = 'http://api.wunderground.com/api/12df1fa14a07ff78/conditions';
+const FORMAT_JSON = '.json';
+
+/**
+ * @file
+ * A block module that displays weather at specified locations.
+ */
+
+/**
+ * Implements hook_help().
+ * 
+ * Displays help and module information.
+ * 
+ * @param $path
+ *   Which path of the site we're using to display help
+ *   
+ * @param $arg
+ *   Array that holds the current path as returned from arg() function
+ */
+function rb_weather_help($path, $arg) {
+	switch ($path) {
+		case 'admin/help#rb_weather':
+			return '<p>' . t('Displays the current weather at specified locations') . '</p>';
+			break;
+	}
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function rb_weather_block_info() {
+	$blocks['current_weather'] = array(
+			'info' => t('RB Weather - current weather block'),
+			'cache' => DRUPAL_CACHE_PER_USER,
+	);
+	
+	return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ * 
+ * Prepares the contents of this block for display on the site.
+ */
+function rb_weather_block_view($delta = '') {
+	switch ($delta) {
+		case 'current_weather':
+			$block['subject'] = t('Current weather');
+			
+			$items = array();
+			
+			if (empty($items)) {
+				$block['content'] = t('No locations to display');
+			}
+			else {
+				$block['content'] = theme('item_list', array(
+						'items' => $items,
+				));
+			}
+	}
+	
+	return $block;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function rb_weather_menu() {
+	$items['admin/config/content/rbweather'] = array(
+			'title' => t('RB Weather'),
+			'description' => t('Configure the settings of the weather modules'),
+			'file' => 'rb_weather.admin.inc',
+			'page callback' => 'drupal_get_form',
+			'page arguments' => array('rb_weather_locations_config_form'),
+			'access arguments' => array('access administration pages'),
+	);
+	$items['admin/config/content/rbweather/saved'] = array(
+			'title' => t('Saved weather locations'),
+			'description' => t('List saved weather locations'),
+			'file' => 'rb_weather.admin.inc',
+			'page callback' => 'drupal_get_form',
+			'page arguments' => array('rb_weather_saved_locations_form'),
+			'access arguments' => array('access administration pages'),
+	);
+
+	return $items;
+}
+
+/**
+ * Constructs an associative array of location identificators and their full names.
+ * 
+ * @return array
+ *   Associative array containing location identificators as keys
+ *   and their full location names as values.
+ */
+function get_saved_locations() {
+	$locations = array();
+	
+	$result = db_select('rb_weather_locations', 'loc')
+					->fields('loc', array('weather_location_identifier'))
+					->execute();
+					
+	while (($location = $result->fetchAssoc()) != FALSE) {
+		$loc_id = $location['weather_location_identifier'];
+		$locations[$loc_id] = get_location_name_by_id($loc_id); 
+	}
+	
+	return $locations;
+}
+
+/**
+ * Parses the full location name out of the API response.
+ * 
+ * @param $location_id
+ *   The identificator of the weather location.
+ *   
+ * @return string
+ *   The parsed full name of the location.
+ */
+function get_location_name_by_id($location_id) {
+	$parsed_conditions = json_decode(file_get_contents(CONDITIONS_URL . $location_id . FORMAT_JSON));
+	
+	return $parsed_conditions->current_observation->display_location->full;
+}
+
+/**
+ * Implements hook_menu_local_tasks_alter().
+ *
+ * @param unknown $data
+ * @param unknown $router_item
+ * @param unknown $root_path
+ */
+function rb_weather_menu_local_tasks_alter(&$data, $router_item, $root_path) {
+	if ($root_path === 'admin/config/content/rbweather') {
+		$data['actions']['output'][] = array(
+				'#theme' => 'menu_local_task',
+				'#link' => array(
+						'title' => t('Show saved locations'),
+						'href' => 'admin/config/content/rbweather/saved',
+						'localized_options' => array(
+								'attributes' => array(
+										'title' => t('Show saved locations'),
+								),
+						),
+				),
+		);
+	}
+}
