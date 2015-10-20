@@ -1,0 +1,49 @@
+@color-grey-dark: #666;
+
+@small-padding: 5px;
+@large-padding: 20px;
+
+@heading-border: solid 1px @color-grey-dark;
+
+.clear-space-around() {
+	margin: 0;
+	padding: 0;
+}
+
+.clearfix:after {
+  content:"";
+  display:table;
+  clear:both;
+}
+
+.locations {
+	&, & li {
+		.clear-space-around();
+	}
+	
+	li {
+		list-style: none;
+	}
+	
+	> li {
+		margin-bottom: @large-padding;
+		
+		&:last-child {
+			margin-bottom: 0;
+		}
+	}
+	
+	h4 {
+		border-bottom: @heading-border;
+		padding: @small-padding;
+		text-align: left;
+	}
+}
+
+.observation {
+	
+	.image,
+	.data {
+		float: left;
+	}
+}

@@ -28,3 +28,50 @@ function rb_weather_schema() {
 	
 	return $schema;
 }
+
+function rb_weather_update_1() {
+	$spec = array(
+			'type' => 'varchar',
+			'description' => t('The name of the location the location ID refers to'),
+			'length' => 255,
+			'not null' => TRUE,
+	);
+	db_add_field('rb_weather_locations', 'location_name', $spec);
+}
+
+function rb_weather_update_2() {
+	$schema['rb_weather_settings'] = array(
+			'description' => t('Table containing the settings for the wunderground api'),
+			'fields' => array(
+					'wsid' => array(
+							'description' => t('The primary identifier  for a weather setting'),
+							'type' => 'serial',
+							'unsigned' => TRUE,
+							'not null' => TRUE,
+					),
+					'uid' => array(
+							'description' => t('The primary identifier of the user the setting belongs to'),
+							'type' => 'serial',
+							'unsigned' => TRUE,
+							'not null' => TRUE,
+					),
+					'api_key' => array(
+							'description' => t('The api key the particular user uses to access the API'),
+							'type' => 'varchar',
+							'not null' => TRUE,
+					),
+					'display' => array(
+							'description' => t('The count of locations to be displayed'),
+							'type' => 'int',
+							'not null' => TRUE,
+					),
+			),
+			'primary_key' => array('wsid'),
+	);
+	
+	db_create_table('rb_weather_settings', $schema['rb_weather_settings']);
+}
+
+function rb_weather_update_3() {
+	db_add_unique_key('rb_weather_settings', 'uqk_user', array('uid'));
+}

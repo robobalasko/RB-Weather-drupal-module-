@@ -72,6 +72,7 @@ function rb_weather_locations_config_form_validate($form, &$form_state) {
 			&& is_numeric($form_state['values']['locations'])
 			&& !isset($form['locations_config']['locations']))  {
 		form_set_error('location', t('You have to select a weather location'));
+		return;
 	}
 	else {
 		$parsed_locations = json_decode(file_get_contents('http://autocomplete.wunderground.com/aq?query=' . urlencode($location)));
@@ -99,13 +100,13 @@ function rb_weather_locations_config_form_submit($form, &$form_state) {
 		$wlid = db_insert('rb_weather_locations')
 		->fields(array(
 				'weather_location_identifier' => $form_state['values']['locations'],
+				'location_name' => $form_state['storage']['locations'][$form_state['values']['locations']],
 		))
 		->execute();
 		
 		drupal_set_message(t('A new weather location has successfully been added'));
 		
-		//TODO Dorobit resetovanie formularu po uspesnom odoslani
-		$form_state['can_reset'] = TRUE;
+		$form_state['storage']['locations'] = array();
 	}
 	
 	$form_state['rebuild'] = TRUE;
@@ -121,6 +122,12 @@ function ajax_rb_weather_locations_config_form_callback($form, &$form_state) {
 	return $form;
 }
 
+/**
+ * Implements hook_form().
+ * 
+ * @param $form
+ * @param $form_state
+ */
 function rb_weather_saved_locations_form($form, &$form_state) {
 	$form['#prefix'] = '<div id="saved-locations-form">';
 	$form['#suffix'] = '</div>';
@@ -137,44 +144,169 @@ function rb_weather_saved_locations_form($form, &$form_state) {
 				'#description' => t('A list of locations you have saved to check wheather at'),
 		);
 		
-		foreach ($locations as $id => $location) {
-			$form['saved_locations'][] = array(
-					'#type' => 'checkbox',
-					'#title' => $location,
-					'#attributes' => array(
-							'name' => 'saved_locations[]',
-					),
-					'#return_value' => $id,
-			);
-		}
+		$form['saved_locations']['locations'] = array(
+				'#type' => 'checkboxes',
+				'#options' => $locations,
+		);
 		
 		$form['submit'] = array(
 				'#type' => 'submit',
 				'#value' => t('Delete selected locations'),
-				/*'#ajax' => array(
+				'#ajax' => array(
 						'callback' => 'ajax_rb_weather_saved_locations_form_callback',
 						'wrapper' => 'saved-locations-form',
-						'method' => 'replace',
 						'effect' => 'fade',
-				),*/
+						'method' => 'replace',
+				),
 		);
 	}
 	
 	return $form;
 }
 
+/**
+ * Implements hook_form_validate().
+ * 
+ * @param $form
+ * @param $form_state
+ */
 function rb_weather_saved_locations_form_validate($form, &$form_state) {
-	print_r($form_state['values']);
+	$selected_locations = extract_selected_locations($form_state);
 	
-	if (empty($form_state['values']['saved_locations'])) {
-		form_set_error('saved_locations', t('You have to select at least one of the locations for a successful removal'));
+	if (empty($selected_locations)) {
+		form_set_error('locations', t('You have to select at least one checkbox if you want to remove a location'));
 	}
 }
 
+/**
+ * Implements hook_form_submit().
+ * 
+ * @param $form
+ * @param $form_state
+ */
 function rb_weather_saved_locations_form_submit($form, &$form_state) {
+	$selected_locations = extract_selected_locations($form_state);
+	$deleted = 0;
+	
+	foreach ($selected_locations as $location) {
+		$success = db_delete('rb_weather_locations')
+						->condition('weather_location_identifier', $location, '=')
+						->execute();
+		
+		if ($success) {
+			$deleted++;
+		}
+	}
+
+	if ($deleted) {
+		drupal_set_message(format_plural($deleted,
+				'1 location has successfully been removed', 
+				'@count locations have successfully been removed',
+				array('@count' => $deleted)));
+	}
+	
 	$form_state['rebuild'] = TRUE;
 }
 
 function ajax_rb_weather_saved_locations_form_callback($form, &$form_state) {
 	return $form;
+}
+
+/**
+ * Returns an array containing the locations identifiers that have been selected.
+ * 
+ * @param $form_state
+ *   The state of the form from which the selected locations will be extracted.
+ */
+function extract_selected_locations(&$form_state) {
+	return array_diff($form_state['values']['locations'], array(0));
+}
+
+/**
+ * Implements hook_form()
+ * 
+ * @param $form
+ * @param $form_state
+ */
+function rb_weather_api_settings_form($form, &$form_state) {
+	$locations_count = get_saved_locations_count();
+	
+	$form['api_key_fieldset'] = array(
+			'#type' => 'fieldset',
+			'#title' => t('Wunderground API key'),
+			'#description' => t('In order to be able to pull data out of the wunderground API, you have to register for an API key'),
+	);
+	$form['api_key_fieldset']['api_key'] = array(
+			'#type' => 'textfield',
+			'#title' => t('API key'),
+			'#description' => t('Enter you Wunderground API key here'),
+			'#required' => TRUE,
+	);
+	
+	if ($locations_count > 1) {
+		$form['display_fieldset'] = array(
+				'#type' => 'fieldset',
+				'#title' => t('How many stations would you like to see'),
+				'#description' => t('Select a number of weather stations you would like to see in your module')
+		);
+		$form['display_fieldset']['display_count'] = array(
+				'#type' => 'select',
+				'#title' => t('Stations count'),
+				'#options' => drupal_map_assoc(range(1, get_saved_locations_count())),
+		);
+	}
+	
+	$form['submit'] = array(
+			'#type' => 'submit',
+			'#value' => t('Save settings'),
+	);
+	
+	return $form;
+}
+
+/**
+ * Implements hook_form_submit().
+ * 
+ * @param $form
+ * @param $form_state
+ */
+function rb_weather_api_settings_form_submit($form, &$form_state) {
+	global $user;
+	
+	$success = FALSE;
+	
+	if ( ! check_key_for_user_exists($user->uid)) {
+		$success = db_insert('rb_weather_settings')
+						->fields(array(
+								'uid' => $user->uid,
+								'api_key' => $form_state['values']['api_key'],
+								'display' => $form_state['values']['display_count'],
+						))
+						->execute();
+	}
+	else {
+		$success = db_update('rb_weather_settings')
+						->fields(array(
+								'api_key' => $form_state['values']['api_key'],
+								'display' => $form_state['values']['display_count'],
+						))
+						->condition('uid', $user->uid, '=')
+						->execute();
+	}
+				
+	if ($success) {
+		drupal_set_message(t('Your settings have been saved successfully'));
+	} else {
+		drupal_set_message(t('There was an error saving your settings', 'error'));
+	}
+	
+	$form_state['rebuild'] = TRUE;
+}
+
+function check_key_for_user_exists($user_id) {
+	return db_select('rb_weather_settings', 's')
+				->fields('s', array('uid'))
+				->condition('uid', $user_id, '=')
+				->execute()
+				->rowCount();
 }

@@ -1,7 +1,7 @@
 <?php
 
-const CONDITIONS_URL = 'http://api.wunderground.com/api/12df1fa14a07ff78/conditions';
-const FORMAT_JSON = '.json';
+define('CONDITIONS_URL', 'http://api.wunderground.com/api/12df1fa14a07ff78/conditions');
+define('FORMAT_JSON', '.json');
 
 /**
  * @file
@@ -45,20 +45,13 @@ function rb_weather_block_info() {
  * Prepares the contents of this block for display on the site.
  */
 function rb_weather_block_view($delta = '') {
+	$block = array();
+	
 	switch ($delta) {
 		case 'current_weather':
-			$block['subject'] = t('Current weather');
-			
-			$items = array();
-			
-			if (empty($items)) {
-				$block['content'] = t('No locations to display');
-			}
-			else {
-				$block['content'] = theme('item_list', array(
-						'items' => $items,
-				));
-			}
+			$block['subject'] = t('RB Weather');
+			$block['content'] = theme('rb_weather_weather_info', get_saved_locations_weather_data());
+			break;
 	}
 	
 	return $block;
@@ -70,81 +63,153 @@ function rb_weather_block_view($delta = '') {
 function rb_weather_menu() {
 	$items['admin/config/content/rbweather'] = array(
 			'title' => t('RB Weather'),
-			'description' => t('Configure the settings of the weather modules'),
-			'file' => 'rb_weather.admin.inc',
-			'page callback' => 'drupal_get_form',
-			'page arguments' => array('rb_weather_locations_config_form'),
-			'access arguments' => array('access administration pages'),
-	);
-	$items['admin/config/content/rbweather/saved'] = array(
-			'title' => t('Saved weather locations'),
 			'description' => t('List saved weather locations'),
 			'file' => 'rb_weather.admin.inc',
 			'page callback' => 'drupal_get_form',
 			'page arguments' => array('rb_weather_saved_locations_form'),
-			'access arguments' => array('access administration pages'),
+			'access arguments' => array('add rb_weather location'),
+	);
+	$items['admin/config/content/rbweather/add'] = array(
+			'title' => t('Add a new location'),
+			'description' => t('Configure the settings of the weather modules'),
+			'file' => 'rb_weather.admin.inc',
+			'page callback' => 'drupal_get_form',
+			'page arguments' => array('rb_weather_locations_config_form'),
+			'access arguments' => array('remove rb_weather location'),
+	);
+	$items['admin/config/content/rbweather/settings'] = array(
+			'title' => t('Wunderground API settings'),
+			'description' => t('COnfigure your API key in order to be able to pull data from Wunderground'),
+			'file' => 'rb_weather.admin.inc',
+			'page callback' => 'drupal_get_form',
+			'page arguments' => array('rb_weather_api_settings_form'),
+			'access arguments' => array('administer rb_weather api settings'),
 	);
 
 	return $items;
 }
 
 /**
- * Constructs an associative array of location identificators and their full names.
+ * Implements hook_permission().
+ */
+function rb_weather_permission() {
+	return array(
+			'add rb_weather location' => array(
+					'title' => t('Add new locations'),
+					'description' => t('Ability to add new locations at which the weather will be checked'),
+			),
+			'remove rb_weather location' => array(
+					'title' => t('Remove locations'),
+					'description' => t('Abilitz to remove the location which have already been added'),
+			),
+	);
+}
+
+/**
+ * Implements hook_menu_local_tasks_alter().
+ *
+ * @param $data
+ * @param $router_item
+ * @param $root_path
+ */
+function rb_weather_menu_local_tasks_alter(&$data, $router_item, $root_path) {
+	if ($root_path === 'admin/config/content/rbweather') {
+			$data['actions']['output'][] = array(
+					'#theme' => 'menu_local_task',
+					'#link' => array(
+							'title' => t('Add new location'),
+							'href' => 'admin/config/content/rbweather/add',
+							'localized_options' => array(
+									'attributes' => array(
+											'title' => t('Add new location'),
+									),
+							),
+					),
+			);
+	}
+}
+
+/**
+ * Implements hook_theme().
+ */
+function rb_weather_theme() {
+	return array(
+			'rb_weather_weather_info' => array(
+					'template' => 'rb_weather_weather_info',
+					'path' => drupal_get_path('module', 'rb_weather') . '/templates',
+					'variables' => array('locations' => get_saved_locations_weather_data()),
+			),
+	);
+}
+
+/**
+ * Implements hook_preprocess_hook().
  * 
+ * @param $vars
+ */
+function rb_weather_preprocess_rb_weather_weather_info(&$vars) {
+	drupal_add_css(drupal_get_path('module', 'rb_weather') . '/css/rb_weather.less');
+}
+
+
+/**
+ * ================================================
+ * FUNCTIONS FOR WORKING WITH THE WUNDERGROUND API
+ * ================================================
+ */
+
+
+/**
+ * Constructs an associative array of location identificators and their full names.
+ *
  * @return array
  *   Associative array containing location identificators as keys
  *   and their full location names as values.
  */
 function get_saved_locations() {
 	$locations = array();
-	
+
 	$result = db_select('rb_weather_locations', 'loc')
-					->fields('loc', array('weather_location_identifier'))
+					->fields('loc', array('weather_location_identifier', 'location_name'))
 					->execute();
-					
+		
 	while (($location = $result->fetchAssoc()) != FALSE) {
-		$loc_id = $location['weather_location_identifier'];
-		$locations[$loc_id] = get_location_name_by_id($loc_id); 
+		$locations[$location['weather_location_identifier']] = $location['location_name'];
 	}
-	
+
 	return $locations;
 }
 
 /**
- * Parses the full location name out of the API response.
+ * Parses out the current weather conditions for the locations
+ * saved in the database.
  * 
- * @param $location_id
- *   The identificator of the weather location.
- *   
- * @return string
- *   The parsed full name of the location.
+ * @return array
+ *   Associative array containing location identifiers as keys
+ *   and the current weather reports as values
  */
-function get_location_name_by_id($location_id) {
-	$parsed_conditions = json_decode(file_get_contents(CONDITIONS_URL . $location_id . FORMAT_JSON));
+function get_saved_locations_weather_data() {
+	$saved_locations = get_saved_locations();
+	$weather_data = array();
 	
-	return $parsed_conditions->current_observation->display_location->full;
+	foreach ($saved_locations as $identifier => $location) {
+		// Download current observation data from the Wunderground API
+		$weather = json_decode(file_get_contents(CONDITIONS_URL . $identifier . FORMAT_JSON));
+		$weather_data[] = $weather->current_observation;
+	}
+	
+	return $weather_data;
 }
 
 /**
- * Implements hook_menu_local_tasks_alter().
- *
- * @param unknown $data
- * @param unknown $router_item
- * @param unknown $root_path
+ * Counts how many locations have been saved.
+ * 
+ * @return
+ *   The number of saved locations.
  */
-function rb_weather_menu_local_tasks_alter(&$data, $router_item, $root_path) {
-	if ($root_path === 'admin/config/content/rbweather') {
-		$data['actions']['output'][] = array(
-				'#theme' => 'menu_local_task',
-				'#link' => array(
-						'title' => t('Show saved locations'),
-						'href' => 'admin/config/content/rbweather/saved',
-						'localized_options' => array(
-								'attributes' => array(
-										'title' => t('Show saved locations'),
-								),
-						),
-				),
-		);
-	}
+function get_saved_locations_count() {
+	return db_select('rb_weather_locations', 'loc')
+				->fields('loc', array('wlid'))
+				->execute()
+				->rowCount();
 }

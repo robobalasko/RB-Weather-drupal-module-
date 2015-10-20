@@ -2,3 +2,5 @@ name = RB Weather
 description = A simple weather module showing weather at specified locations
 core = 7.x
 configure = admin/config/content/rbweather
+
+files[] = rb_weather.admin.inc
